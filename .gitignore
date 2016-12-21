@@ -1,0 +1,7 @@
+.vs/CharacterReader/v14/.suo
+CharacterReader/bin/Debug/
+CharacterReader/obj/Debug/
+ConcurrentCharacterReaderConsoleApplication/bin/
+ConcurrentCharacterReaderConsoleApplication/obj/
+CharacterReader.Core/obj/
+CharacterReader.Core/bin/
