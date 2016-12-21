@@ -13,7 +13,6 @@ namespace ConcurrentCharacterReaderConsoleApplication
 {
     public class Program
     {
-        private static readonly Timer Timer = new Timer(10000);
         private static readonly StringSplitter StringSplitter = new StringSplitter();
         private static readonly WordFrequenciesCounter WordFrequenciesCounter = new WordFrequenciesCounter();
         private static readonly ConcurrentBag<string> TextsThatAreCompletelyRead = new ConcurrentBag<string>();
@@ -22,27 +21,28 @@ namespace ConcurrentCharacterReaderConsoleApplication
 
         public static void Main(string[] args)
         {
-            using (ICharacterReader characterReader1 = new SlowCharacterReader(), characterReader2 = new SlowCharacterReader(), characterReader3 = new SlowCharacterReader(), characterReader4 = new SlowCharacterReader())
+            using (var timer = new Timer(10000))
             {
-                Process(new[] { characterReader1, characterReader2, characterReader3, characterReader4 });
+                using (ICharacterReader characterReader1 = new SlowCharacterReader(), characterReader2 = new SlowCharacterReader(), characterReader3 = new SlowCharacterReader(), characterReader4 = new SlowCharacterReader())
+                {
+                    Process(new[] { characterReader1, characterReader2, characterReader3, characterReader4 }, timer);
+                }
             }
-
-            Timer.Dispose();
         }
 
-        private static void Process(ICharacterReader[] characterReaders)
+        private static void Process(ICharacterReader[] characterReaders, Timer timer)
         {
             _characterReaders = characterReaders;
 
             var tasks = new List<Task>();
 
-            Timer.Start();
+            timer.Start();
 
             foreach (var characterReader in characterReaders)
             {
                 var task = Task.Run(() =>
                 {
-                    using (var characterReaderProcessorWithProgressNotification = new CharacterReaderProcessorWithProgressNotification(characterReader, new Progress<string>(ReportProgress), Timer))
+                    using (var characterReaderProcessorWithProgressNotification = new CharacterReaderProcessorWithProgressNotification(characterReader, new Progress<string>(ReportProgress), timer))
                     {
                         var text = characterReaderProcessorWithProgressNotification.ReadToEnd();
                         TextsThatAreCompletelyRead.Add(text);
