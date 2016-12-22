@@ -25,6 +25,8 @@ namespace CharacterReader
 
                 OutputToConsole(wordFrequencies);
             }
+
+            Console.ReadKey();
         }
 
         private static void OutputToConsole(IOrderedEnumerable<KeyValuePair<string, int>> wordFrequencies)

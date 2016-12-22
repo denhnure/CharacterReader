@@ -3,25 +3,28 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
-using System.Timers;
 using CharacterReader.Core.CharacterReader;
 using CharacterReader.Core.CharacterReaderProcessor;
 using CharacterReader.Core.StringSplitter;
 using CharacterReader.Core.WordFrequenciesCounter;
+using Timer = System.Timers.Timer;
 
 namespace ConcurrentCharacterReaderConsoleApplication
 {
     public class Program
     {
+        const int TimerFrequency = 10000;
+        private static ICharacterReader[] _characterReaders;
         private static readonly StringSplitter StringSplitter = new StringSplitter();
         private static readonly WordFrequenciesCounter WordFrequenciesCounter = new WordFrequenciesCounter();
         private static readonly ConcurrentBag<string> TextsThatAreCompletelyRead = new ConcurrentBag<string>();
-        private static readonly ConcurrentStack<string> TextsThatArePartiallyRead = new ConcurrentStack<string>();
-        private static ICharacterReader[] _characterReaders;
+        private static readonly List<string> TextsThatArePartiallyRead = new List<string>();
+        private static readonly object SyncObjectForProgressReport = new object();
+        private static readonly object SyncObjectForConsoleOutput = new object(); //NOTE: prevents situations when 2 or more threads write to console simultaneously
 
         public static void Main(string[] args)
         {
-            using (var timer = new Timer(10000))
+            using (var timer = new Timer(TimerFrequency))
             {
                 using (ICharacterReader characterReader1 = new SlowCharacterReader(), characterReader2 = new SlowCharacterReader(), characterReader3 = new SlowCharacterReader(), characterReader4 = new SlowCharacterReader())
                 {
@@ -34,6 +37,7 @@ namespace ConcurrentCharacterReaderConsoleApplication
         {
             _characterReaders = characterReaders;
 
+            var progress = new Progress<string>(ReportProgress);
             var tasks = new List<Task>();
 
             timer.Start();
@@ -42,7 +46,7 @@ namespace ConcurrentCharacterReaderConsoleApplication
             {
                 var task = Task.Run(() =>
                 {
-                    using (var characterReaderProcessorWithProgressNotification = new CharacterReaderProcessorWithProgressNotification(characterReader, new Progress<string>(ReportProgress), timer))
+                    using (var characterReaderProcessorWithProgressNotification = new CharacterReaderProcessorWithProgressNotification(characterReader, progress, timer))
                     {
                         var text = characterReaderProcessorWithProgressNotification.ReadToEnd();
                         TextsThatAreCompletelyRead.Add(text);
@@ -53,50 +57,72 @@ namespace ConcurrentCharacterReaderConsoleApplication
             }
 
             var bunchOfTasks = Task.WhenAll(tasks);
-            bunchOfTasks.Wait();
 
-            var complete = TextsThatAreCompletelyRead.SelectMany(text => StringSplitter.SplitByWords(text)).ToList();
-            var wordFrequiencies = WordFrequenciesCounter.Calculate(complete);
+            try
+            {
+                bunchOfTasks.Wait();
+            }
+            catch (AggregateException)
+            {
+                Console.WriteLine("Ooops. Something crashed. Please, restart!");
+            }
 
-            Console.WriteLine("Final results:");
+            var processedWords = TextsThatAreCompletelyRead.SelectMany(text => StringSplitter.SplitByWords(text)).ToList();
 
-            OutputToConsole(wordFrequiencies);
-
+            CalculateWordFrequenciesAndOutputToConsole(processedWords, false);
+            
             Console.ReadKey();
         }
 
         private static void ReportProgress(string partiallyReadText)
         {
-            lock (new object())
+            lock (SyncObjectForProgressReport)
             {
-                TextsThatArePartiallyRead.Push(partiallyReadText);
+                TextsThatArePartiallyRead.Add(partiallyReadText);
 
                 if (TextsThatAreCompletelyRead.Count + TextsThatArePartiallyRead.Count == _characterReaders.Length)
                 {
-                    var complete = TextsThatAreCompletelyRead.SelectMany(text => StringSplitter.SplitByWords(text)).ToList();
-                    var partiall = TextsThatArePartiallyRead.SelectMany(text => StringSplitter.SplitByWordsAndRemoveTheLast(text)).ToList();
+                    var processedWords = TextsThatAreCompletelyRead.SelectMany(text => StringSplitter.SplitByWords(text)).ToList();
+                    var wordsOfPartiallyReadTexts = TextsThatArePartiallyRead.SelectMany(text => StringSplitter.SplitByWordsAndRemoveTheLast(text)).ToList();
 
-                    complete.AddRange(partiall);
+                    processedWords.AddRange(wordsOfPartiallyReadTexts);
 
                     TextsThatArePartiallyRead.Clear();
 
-                    var wordFrequiencies = WordFrequenciesCounter.Calculate(complete);
-
-                    Console.WriteLine("Intermediate results:");
-
-                    OutputToConsole(wordFrequiencies);
+                    CalculateWordFrequenciesAndOutputToConsole(processedWords);
                 }
             }
         }
 
-        private static void OutputToConsole(IOrderedEnumerable<KeyValuePair<string, int>> wordFrequencies)
+        private static async void CalculateWordFrequenciesAndOutputToConsole(List<string> processedWords, bool intermediateResults = true)
         {
-            foreach (KeyValuePair<string, int> wordFrequency in wordFrequencies)
+            await Task.Run(() =>
             {
-                Console.WriteLine($"{wordFrequency.Key} - {wordFrequency.Value}");
-            }
+                var wordFrequiencies = WordFrequenciesCounter.Calculate(processedWords);
 
-            Console.WriteLine();
+                OutputToConsole(wordFrequiencies, intermediateResults);
+            });
+        }
+
+        private static void OutputToConsole(IOrderedEnumerable<KeyValuePair<string, int>> wordFrequencies, bool intermediateResults = true)
+        {
+            lock (SyncObjectForConsoleOutput)
+            {
+                if (!wordFrequencies.Any())
+                {
+                    Console.WriteLine("Nothing processed so far :)");
+                    return;
+                }
+
+                Console.WriteLine(intermediateResults ? "Intermediate results:" : "Final results:");
+
+                foreach (KeyValuePair<string, int> wordFrequency in wordFrequencies)
+                {
+                    Console.WriteLine($"{wordFrequency.Key} - {wordFrequency.Value}");
+                }
+
+                Console.WriteLine();
+            }
         }
     }
 }

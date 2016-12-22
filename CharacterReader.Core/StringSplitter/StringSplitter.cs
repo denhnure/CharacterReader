@@ -14,7 +14,7 @@ namespace CharacterReader.Core.StringSplitter
         public string[] SplitByWordsAndRemoveTheLast(string input)
         {
             var words = SplitByWords(input);
-            return words.Take(words.Length - 1).ToArray(); // only part of the word can be processed and returned (for example: "He" instead of "Hello" -> excluding this from results)
+            return words.Take(words.Length - 1).ToArray(); // only part of the word can be processed and returned (for example: "He" instead of "Hello" in SlowCharacterReader -> excluding this from results)
         }
     }
 }
